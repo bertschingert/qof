@@ -10,9 +10,17 @@ data Process  = Process { pid :: Int
                         , comm :: String
                         }
 
+-- An open file may be the process's CWD, its text, or an entry in the open file table.
+data OpenFileType = Fd Int | Cwd | Txt
+
+instance Show OpenFileType where
+    show (Fd fd) = show fd
+    show Cwd = "CWD"
+    show Txt = "TXT"
+
 -- The representation of an open file.
 data File = File { name :: String
-                 , fd :: Int
+                 , ty :: OpenFileType
                  , proc :: Process
                  }
 
@@ -46,7 +54,7 @@ procPath pid name = "/proc/" ++ show pid ++ "/" ++ name
 doOneFile :: Process -> Int -> IO ()
 doOneFile (Process pid comm) fd = do
     name <- readSymbolicLink $ procPath pid "fd/" ++ show fd
-    putStrLn . show $ File name fd (Process pid comm)
+    putStrLn . show $ File name (Fd fd) (Process pid comm)
 
 doFiles :: Process -> IO ()
 doFiles (Process pid comm) = do
