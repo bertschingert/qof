@@ -21,8 +21,8 @@ data OpenFileType = Fd Int | Fail String | Cwd | Txt
 instance Show OpenFileType where
     show (Fd fd) = show fd
     show (Fail reason) = reason
-    show Cwd = "CWD"
-    show Txt = "TXT"
+    show Cwd = "cwd"
+    show Txt = "txt"
 
 -- The representation of an open file.
 data File = File { name :: String
@@ -37,14 +37,20 @@ pad width used = let n = max 1 (width - used) in
     replicate n ' '
 
 -- Add padding on the right of a string to ensure it uses at least `n` columns.
-padded :: String -> Int -> String
-padded thing n = let thing_len = length thing in
+rightPad :: String -> Int -> String
+rightPad thing n = let thing_len = length thing in
         thing ++ (pad n thing_len)
 
+-- Add padding on the left and right of a string to ensure it uses at least
+-- `before` + `after` columns.
+leftPad :: Int -> String -> Int -> String
+leftPad before thing after = let thing_len = length thing in
+        (pad before thing_len) ++ thing ++ (replicate after ' ')
+
 instance Show File where
-    show (File name fd (Process pid comm)) = padded comm 8 ++
-                                        padded (show pid) 10 ++
-                                        padded (show fd) 5 ++
+    show (File name fd (Process pid comm)) = rightPad comm 8 ++
+                                        leftPad 10 (show pid) 1 ++
+                                        leftPad 5 (show fd) 2 ++
                                         name
 
 -- Filter out dirents under "/proc/" that are not PIDs.
@@ -70,7 +76,7 @@ doOneFile proc fd = do
     let path = procPath (pid proc) "fd/" ++ show fd
     name_or_error <- try $ do readSymbolicLink path
     let name = nameOrError path name_or_error
-    putStrLn . show $ File name (Fd fd) proc
+    print $ File name (Fd fd) proc
 
 -- Print out a line for the processe's current working directory.
 doCwd :: Process -> IO ()
@@ -78,7 +84,7 @@ doCwd proc = do
     let path = procPath (pid proc) "cwd"
     cwd_or_error <- try $ readSymbolicLink path
     let cwd = nameOrError path cwd_or_error
-    putStrLn . show $ File cwd Cwd proc
+    print $ File cwd Cwd proc
 
 -- Print out lines for each open file of the process.
 doFiles :: Process -> IO ()
@@ -87,7 +93,7 @@ doFiles proc = do
     let fd_path = procPath (pid proc) "fd"
     fds_or_error <- try $ do listDirectory fd_path
     case (fds_or_error :: Either IOError [FilePath]) of
-                    Left e -> putStrLn . show $
+                    Left e -> print $
                         File (fd_path ++ " (Could not read directory)") (Fail "NOFD") proc
                     Right fds -> mapM_ (doOneFile proc . read) fds
 
