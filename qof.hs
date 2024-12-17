@@ -41,6 +41,7 @@ instance Show File where
                                         padded (show fd) 4 ++
                                         name
 
+-- Filter out dirents under "/proc/" that are not PIDs.
 onlyNumbers :: [FilePath] -> [Int]
 onlyNumbers ents  = catMaybes $ map (\ent -> readMaybe ent :: Maybe Int) ents
 
@@ -51,20 +52,28 @@ trimNl s = reverse . dropWhile (== '\n') . reverse $ s
 procPath :: Int -> String -> String
 procPath pid name = "/proc/" ++ show pid ++ "/" ++ name
 
+-- Print out a line for a single fd of the process.
 doOneFile :: Process -> Int -> IO ()
-doOneFile (Process pid comm) fd = do
-    name <- readSymbolicLink $ procPath pid "fd/" ++ show fd
-    putStrLn . show $ File name (Fd fd) (Process pid comm)
+doOneFile proc fd = do
+    name <- readSymbolicLink $ procPath (pid proc) "fd/" ++ show fd
+    putStrLn . show $ File name (Fd fd) proc
 
+-- Print out a line for the processe's current working directory.
+doCwd :: Process -> IO ()
+doCwd proc = do
+    cwd <- readSymbolicLink $ procPath (pid proc) "cwd"
+    putStrLn . show $ File cwd Cwd proc
+
+-- Print out lines for each open file of the process.
 doFiles :: Process -> IO ()
-doFiles (Process pid comm) = do
-    fds <- listDirectory $ procPath pid "fd"
-    mapM_ (doOneFile (Process pid comm) . read) fds
+doFiles proc = do
+    doCwd proc
+    fds <- listDirectory $ procPath (pid proc) "fd"
+    mapM_ (doOneFile proc . read) fds
 
 doOnePid :: Int -> IO ()
 doOnePid pid = do
-    let f = procPath pid "comm"
-    comm <- readFile f
+    comm <- readFile $ procPath pid "comm"
     let p = Process pid (trimNl comm)
     doFiles p
 
