@@ -1,3 +1,4 @@
+import Control.Exception
 import Control.Monad
 import Data.Maybe
 import System.Directory
@@ -10,11 +11,16 @@ data Process  = Process { pid :: Int
                         , comm :: String
                         }
 
--- An open file may be the process's CWD, its text, or an entry in the open file table.
-data OpenFileType = Fd Int | Cwd | Txt
+-- An open file may be:
+--   the process's CWD
+--   its text
+--   an entry in the open file table
+--   an entry representing failure to read some information
+data OpenFileType = Fd Int | Fail String | Cwd | Txt
 
 instance Show OpenFileType where
     show (Fd fd) = show fd
+    show (Fail reason) = reason
     show Cwd = "CWD"
     show Txt = "TXT"
 
@@ -38,7 +44,7 @@ padded thing n = let thing_len = length thing in
 instance Show File where
     show (File name fd (Process pid comm)) = padded comm 8 ++
                                         padded (show pid) 10 ++
-                                        padded (show fd) 4 ++
+                                        padded (show fd) 5 ++
                                         name
 
 -- Filter out dirents under "/proc/" that are not PIDs.
@@ -52,24 +58,38 @@ trimNl s = reverse . dropWhile (== '\n') . reverse $ s
 procPath :: Int -> String -> String
 procPath pid name = "/proc/" ++ show pid ++ "/" ++ name
 
+-- Given a `path` and the result of trying to read that path, construct a
+-- string with either its actual data or an indication that an error occurred.
+nameOrError :: String -> Either IOError String -> String
+nameOrError path (Left e) = path ++ " (Could not read file)"
+nameOrError _ (Right val) = val
+
 -- Print out a line for a single fd of the process.
 doOneFile :: Process -> Int -> IO ()
 doOneFile proc fd = do
-    name <- readSymbolicLink $ procPath (pid proc) "fd/" ++ show fd
+    let path = procPath (pid proc) "fd/" ++ show fd
+    name_or_error <- try $ do readSymbolicLink path
+    let name = nameOrError path name_or_error
     putStrLn . show $ File name (Fd fd) proc
 
 -- Print out a line for the processe's current working directory.
 doCwd :: Process -> IO ()
 doCwd proc = do
-    cwd <- readSymbolicLink $ procPath (pid proc) "cwd"
+    let path = procPath (pid proc) "cwd"
+    cwd_or_error <- try $ readSymbolicLink path
+    let cwd = nameOrError path cwd_or_error
     putStrLn . show $ File cwd Cwd proc
 
 -- Print out lines for each open file of the process.
 doFiles :: Process -> IO ()
 doFiles proc = do
     doCwd proc
-    fds <- listDirectory $ procPath (pid proc) "fd"
-    mapM_ (doOneFile proc . read) fds
+    let fd_path = procPath (pid proc) "fd"
+    fds_or_error <- try $ do listDirectory fd_path
+    case (fds_or_error :: Either IOError [FilePath]) of
+                    Left e -> putStrLn . show $
+                        File (fd_path ++ " (Could not read directory)") (Fail "NOFD") proc
+                    Right fds -> mapM_ (doOneFile proc . read) fds
 
 doOnePid :: Int -> IO ()
 doOnePid pid = do
